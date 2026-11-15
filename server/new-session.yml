@@ -1,0 +1,4 @@
+# Config overlay for sessions the dashboard starts (`omp --config=<this file>`).
+# A profile may set autoResume: true, which reopens the most recent
+# session in the folder. "New session" on the phone must start a fresh one.
+autoResume: false

@@ -1,0 +1,40 @@
+{
+  "publicUrl": "https://your-mac.your-tailnet.ts.net",
+  "allowedLogins": ["you@example.com"],
+  "port": 7478,
+  "omp": { "bin": "~/.bun/bin/omp", "configRoot": "~/.omp" },
+  "tailscaleBin": "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
+  "projects": {
+    "root": "~/dev",
+    "otherName": null,
+    "list": [
+      { "name": "orion", "families": ["orion-web"] },
+      { "name": "vega", "families": ["vega"] }
+    ]
+  },
+  "pageCopy": { "publicUrl": null, "port": 7479 },
+  "longTasks": { "enabled": false },
+  "launch": {
+    "enabled": false,
+    "cmuxBin": "/Applications/cmux.app/Contents/Resources/bin/cmux",
+    "profile": null,
+    "models": { "default": { "label": "Profile default", "model": null, "thinking": null } },
+    "defaultModel": "default"
+  },
+  "control": { "enabled": false, "devCycles": false, "ownerOnlyWords": [] },
+  "reports": { "enabled": false },
+  "cmuxGroups": { "enabled": false },
+  "localApi": { "enabled": false, "dir": null },
+  "push": {
+    "enabled": false,
+    "bundleId": "io.github.you.ompmobile",
+    "teamId": "TEAMID1234",
+    "keys": {
+      "sandbox": { "keyId": "KEYID12345", "path": "~/.config/omp-mobile/AuthKey_KEYID12345.p8" },
+      "production": null
+    },
+    "pollSeconds": 5,
+    "includeSummary": true
+  },
+  "stateDir": "~/.config/omp-mobile/state"
+}

@@ -1,0 +1,33 @@
+// Build settings of the OmpMobile app target, for Debug and Release.
+// Your own team, bundle id prefix and entitlements go in Local.xcconfig: copy Local.example.xcconfig.
+
+IPHONEOS_DEPLOYMENT_TARGET = 26.0
+TARGETED_DEVICE_FAMILY = 1,2
+SWIFT_VERSION = 6.0
+GENERATE_INFOPLIST_FILE = YES
+
+OMP_BUNDLE_ID_PREFIX = io.github.example
+PRODUCT_BUNDLE_IDENTIFIER = $(OMP_BUNDLE_ID_PREFIX).ompmobile
+
+INFOPLIST_KEY_CFBundleDisplayName = omp mobile
+INFOPLIST_KEY_UILaunchScreen_Generation = YES
+
+// The version App Store Connect shows, and the build number, raised for each upload of a version.
+MARKETING_VERSION = 0.1.0
+CURRENT_PROJECT_VERSION = 1
+
+// The app's only encryption is Apple's HTTPS in URLSession and WebKit, which is exempt.
+INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO
+
+// iPhone stays in portrait; iPad turns every way.
+INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait
+INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
+
+// The chat page's Take Photo opens the camera.
+INFOPLIST_KEY_NSCameraUsageDescription = The chat uses the camera when you take a photo to send.
+
+CODE_SIGN_STYLE = Automatic
+DEVELOPMENT_TEAM =
+CODE_SIGN_ENTITLEMENTS =
+
+#include? "Local.xcconfig"

@@ -1,0 +1,16 @@
+{
+  "aps": {
+    "alert": { "title": "backup failed", "subtitle": "nightly build", "body": "Disk full: 2 of 40 folders copied" },
+    "sound": "default",
+    "thread-id": "0194f3a2-1c2d-7e3f-8a4b-5c6d7e8f9a03"
+  },
+  "omp": {
+    "v": 1,
+    "kind": "report",
+    "sessionId": "0194f3a2-1c2d-7e3f-8a4b-5c6d7e8f9a03",
+    "reportId": "0194f3a2-1c2d-7e3f-8a4b-5c6d7e8f9b02",
+    "job": "backup",
+    "outcome": "failed",
+    "at": "2026-11-12T03:04:00.000Z"
+  }
+}

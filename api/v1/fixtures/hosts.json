@@ -1,0 +1,83 @@
+{
+  "fetchedAt": 1762995600000,
+  "hosts": [
+    {
+      "instanceId": "inst-bravo",
+      "generation": 1,
+      "sessionId": "0194f3a2-1c2d-7e3f-8a4b-5c6d7e8f9a02",
+      "sessionName": null,
+      "cwd": "/Users/you/dev/795vega",
+      "folder": "795vega",
+      "project": "vega",
+      "model": "openai/gpt-5",
+      "startedAt": 1762993000000,
+      "participants": 2,
+      "relayConnected": true,
+      "inputRequired": true,
+      "busy": false,
+      "access": "view",
+      "pinned": false,
+      "reports": []
+    },
+    {
+      "instanceId": "inst-alpha",
+      "generation": 3,
+      "sessionId": "0194f3a2-1c2d-7e3f-8a4b-5c6d7e8f9a01",
+      "sessionName": "release notes",
+      "cwd": "/Users/you/dev/751orion-web",
+      "folder": "751orion-web",
+      "project": "orion",
+      "model": "anthropic/claude-sonnet-4-5",
+      "startedAt": 1762990000000,
+      "participants": 1,
+      "relayConnected": true,
+      "inputRequired": false,
+      "busy": true,
+      "access": "control",
+      "pinned": true,
+      "reports": [
+        {
+          "id": "0194f3a2-1c2d-7e3f-8a4b-5c6d7e8f9b01",
+          "job": "digest",
+          "outcome": "update",
+          "summary": "3 new items",
+          "details": null,
+          "at": "2026-11-12T08:00:00.000Z"
+        }
+      ]
+    }
+  ],
+  "longTasks": [
+    {
+      "sessionId": "0194f3a2-1c2d-7e3f-8a4b-5c6d7e8f9a01",
+      "title": "release notes",
+      "cwd": "/Users/you/dev/751orion-web",
+      "folder": "751orion-web",
+      "project": "orion",
+      "profile": "work",
+      "lastActiveAt": 1762995000000,
+      "reports": [
+        {
+          "id": "0194f3a2-1c2d-7e3f-8a4b-5c6d7e8f9b01",
+          "job": "digest",
+          "outcome": "update",
+          "summary": "3 new items",
+          "details": null,
+          "at": "2026-11-12T08:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "sessionId": "0194f3a2-1c2d-7e3f-8a4b-5c6d7e8f9a03",
+      "title": "nightly build",
+      "cwd": "/Users/you/dev/724atlas-nightly",
+      "folder": "724atlas-nightly",
+      "project": "dev",
+      "profile": null,
+      "lastActiveAt": 1762900000000,
+      "reports": []
+    }
+  ],
+  "projects": ["orion", "vega", "dev"],
+  "pageCopy": { "ok": true }
+}

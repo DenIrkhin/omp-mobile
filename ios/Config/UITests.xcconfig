@@ -1,0 +1,7 @@
+// Build settings of the OmpMobileUITests target: those of Base.xcconfig and Local.xcconfig, with the
+// test runner's own bundle id and never the push entitlement.
+
+#include "Base.xcconfig"
+
+PRODUCT_BUNDLE_IDENTIFIER = $(OMP_BUNDLE_ID_PREFIX).ompmobile.uitests
+CODE_SIGN_ENTITLEMENTS =

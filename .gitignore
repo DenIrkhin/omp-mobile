@@ -1,0 +1,12 @@
+.DS_Store
+server/collab-dist/
+server/.collab-build/
+server/.collab-build.lock
+server/node_modules/
+*.p8
+ios/Config/Local.xcconfig
+xcuserdata/
+*.xcuserstate
+ios/OmpKit/.build/
+ios/OmpKit/.swiftpm/
+DerivedData/

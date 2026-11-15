@@ -1,0 +1,18 @@
+name: ios
+
+on:
+  push:
+    paths: ["ios/**", "api/**", ".github/workflows/ios.yml"]
+  pull_request:
+    paths: ["ios/**", "api/**", ".github/workflows/ios.yml"]
+
+jobs:
+  test:
+    # OmpKit needs Swift 6.2 and macOS 26 or later, and the app's project needs Xcode 27; this image has both.
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test OmpKit
+        run: swift test --package-path ios/OmpKit
+      - name: Build the app
+        run: xcodebuild build -project ios/OmpMobile.xcodeproj -scheme OmpMobile -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO

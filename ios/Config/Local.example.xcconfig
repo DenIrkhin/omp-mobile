@@ -1,0 +1,11 @@
+// Copy this file to Local.xcconfig in this folder and put in your own values. Git ignores
+// Local.xcconfig. Base.xcconfig includes it last, so these lines replace its defaults.
+
+// Your Apple team id, from Xcode > Settings > Apple Accounts.
+DEVELOPMENT_TEAM = TEAMID1234
+
+// A reverse-DNS prefix of your own; the app's bundle id becomes <prefix>.ompmobile.
+OMP_BUNDLE_ID_PREFIX = io.github.example
+
+// Paid Apple Developer Program teams only: push notifications. A free Personal Team cannot sign it.
+// CODE_SIGN_ENTITLEMENTS = OmpMobile/Push.entitlements

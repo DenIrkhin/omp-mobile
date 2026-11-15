@@ -1,0 +1,1311 @@
+Changes build-collab.ts applies to omp's packages/collab-web before building the dashboard's page copy:
+- keep the agents panel closed until you open it (upstream opens it when the first subagent appears)
+- drop the Umami analytics script tag
+- attach images to a prompt: picker button and paste, re-encoded as JPEG to fit one replicated entry (lib/images.ts)
+- on a touch screen Enter types a newline; only the Send button sends
+- guest name: a name typed on the connect screen, else the dashboard's ?name= (the Tailscale machine name), else "guest"
+- theme from the dashboard's ?theme=; no theme toggle in the chat header
+- mobile header: the chat name (live sessionName) on up to two lines in place of the omp mark; no leave button
+- mobile header: the connection dot centered in its circle
+- keep an encrypted copy of each chat on the device (IndexedDB, lib/transcript-cache.ts) and show it, marked "Saved copy", until the live snapshot arrives
+
+diff --git a/packages/collab-web/index.html b/packages/collab-web/index.html
+index 10fac53..208a87b 100644
+--- a/packages/collab-web/index.html
++++ b/packages/collab-web/index.html
+@@ -72,9 +72,6 @@
+ 				}
+ 			}
+ 		</script>
+-
+-		<!-- Analytics. data-exclude-hash keeps the E2E room key (URL fragment) out of analytics. -->
+-		<script defer src="https://um.can.ac/script.js" data-website-id="28ab5a7d-3ca4-4c85-9da5-666fa731cb92" data-exclude-hash="true"></script>
+ 	</head>
+ 	<body>
+ 		<div id="root"></div>
+diff --git a/packages/collab-web/src/app.tsx b/packages/collab-web/src/app.tsx
+index a662508..8bcba78 100644
+--- a/packages/collab-web/src/app.tsx
++++ b/packages/collab-web/src/app.tsx
+@@ -14,17 +14,39 @@ import type { ToolRenderHost } from "./tool-render";
+ import "./components/shell/shell.css";
+ 
+ const NAME_KEY = "omp.collab.name";
++const DEFAULT_NAME = "guest";
+ 
+ interface Creds {
+ 	link: string;
+ 	name: string;
+ }
+ 
++/** The device name the omp-sessions dashboard puts in `?name=` (the Tailscale machine name). */
++function linkName(): string | null {
++	return new URLSearchParams(window.location.search).get("name")?.trim().slice(0, 32) || null;
++}
++
++/** A name typed on the connect screen. "guest" is the placeholder, not a choice. */
++function chosenName(): string | null {
++	try {
++		const name = localStorage.getItem(NAME_KEY)?.trim();
++		return name && name !== DEFAULT_NAME ? name : null;
++	} catch {
++		return null;
++	}
++}
++
+ function storedName(): string {
++	return chosenName() ?? linkName() ?? DEFAULT_NAME;
++}
++
++/** Keeps a typed name for later joins; typing the device name or "guest" goes back to the default. */
++function rememberName(name: string): void {
+ 	try {
+-		return localStorage.getItem(NAME_KEY) ?? "guest";
++		if (name === DEFAULT_NAME || name === linkName()) localStorage.removeItem(NAME_KEY);
++		else localStorage.setItem(NAME_KEY, name);
+ 	} catch {
+-		return "guest";
++		// storage unavailable (private mode) — non-fatal
+ 	}
+ }
+ 
+@@ -50,11 +72,6 @@ export function App(): ReactNode {
+ 			return;
+ 		}
+ 		next.connect();
+-		try {
+-			localStorage.setItem(NAME_KEY, name);
+-		} catch {
+-			// storage unavailable (private mode) — non-fatal
+-		}
+ 		credsRef.current = { link, name };
+ 		window.location.hash = link;
+ 		setConnectError(null);
+@@ -108,7 +125,16 @@ export function App(): ReactNode {
+ 	}, [client]);
+ 
+ 	if (!client) {
+-		return <ConnectScreen defaultName={storedName()} error={connectError} onConnect={connect} />;
++		return (
++			<ConnectScreen
++				defaultName={storedName()}
++				error={connectError}
++				onConnect={(link, name) => {
++					rememberName(name);
++					connect(link, name);
++				}}
++			/>
++		);
+ 	}
+ 	return <Session client={client} onLeave={leave} onRejoin={rejoin} />;
+ }
+@@ -123,7 +149,6 @@ function Session({ client, onLeave, onRejoin }: SessionProps): ReactNode {
+ 	const snap = useGuestSnapshot(client);
+ 	const [railOpen, setRailOpen] = useState(false);
+ 	const [selectedId, setSelectedId] = useState<string | null>(null);
+-	const autoOpenedRef = useRef(false);
+ 
+ 	const subCount = useMemo(() => snap.agents.filter(a => a.kind === "sub").length, [snap.agents]);
+ 
+@@ -139,19 +164,20 @@ function Session({ client, onLeave, onRejoin }: SessionProps): ReactNode {
+ 		[agentIds],
+ 	);
+ 
+-	// Auto-open the rail the first time a subagent appears.
+-	useEffect(() => {
+-		if (subCount > 0 && !autoOpenedRef.current) {
+-			autoOpenedRef.current = true;
+-			setRailOpen(true);
+-		}
+-	}, [subCount]);
+-
+ 	const title = snap.header?.title ?? snap.state?.sessionName ?? "session";
+ 	useEffect(() => {
+ 		document.title = `${title} · omp collab`;
+ 	}, [title]);
+ 
++	// A phone may suspend or discard a hidden tab: save the pending on-device copy first.
++	useEffect(() => {
++		const onVisibilityChange = (): void => {
++			if (document.visibilityState === "hidden") client.flushCache();
++		};
++		document.addEventListener("visibilitychange", onVisibilityChange);
++		return () => document.removeEventListener("visibilitychange", onVisibilityChange);
++	}, [client]);
++
+ 	const drawerAgent = selectedId != null ? snap.agents.find(a => a.id === selectedId) : undefined;
+ 	const toggleRail = useCallback(() => setRailOpen(open => !open), []);
+ 	const closeDrawer = useCallback(() => setSelectedId(null), []);
+@@ -167,7 +193,6 @@ function Session({ client, onLeave, onRejoin }: SessionProps): ReactNode {
+ 				subCount={subCount}
+ 				railOpen={railOpen}
+ 				onToggleRail={toggleRail}
+-				onLeave={onLeave}
+ 			/>
+ 			<main className="sh-main">
+ 				<section className="sh-panel" data-rail={railOpen ? "true" : "false"}>
+@@ -224,6 +249,7 @@ function Session({ client, onLeave, onRejoin }: SessionProps): ReactNode {
+ 				phase={snap.phase}
+ 				endedReason={snap.endedReason}
+ 				loading={snap.loading}
++				cached={snap.cached}
+ 				onRejoin={onRejoin}
+ 				onNewLink={onLeave}
+ 			/>
+diff --git a/packages/collab-web/src/components/shell/Banners.tsx b/packages/collab-web/src/components/shell/Banners.tsx
+index 8ac4ee1..67344f1 100644
+--- a/packages/collab-web/src/components/shell/Banners.tsx
++++ b/packages/collab-web/src/components/shell/Banners.tsx
+@@ -5,17 +5,21 @@ export interface BannersProps {
+ 	phase: ConnectionPhase;
+ 	endedReason: string | null;
+ 	loading: GuestSnapshot["loading"];
++	/** The transcript on screen is this device's saved copy, not the live session. */
++	cached: boolean;
+ 	onRejoin(): void;
+ 	onNewLink(): void;
+ }
+ 
+-export function Banners({ phase, endedReason, loading, onRejoin, onNewLink }: BannersProps): ReactNode {
++export function Banners({ phase, endedReason, loading, cached, onRejoin, onNewLink }: BannersProps): ReactNode {
+ 	const progress = loading && loading.total > 0 ? ` ${Math.floor((loading.received / loading.total) * 100)}%` : "";
+ 	if (phase === "connecting" || phase === "waiting") {
++		let text = phase === "connecting" ? "Connecting to relay…" : `Joining session…${progress}`;
++		if (cached) text = phase === "connecting" ? "Saved copy · connecting…" : `Saved copy · syncing…${progress}`;
+ 		return (
+ 			<div className="sh-banner" role="status">
+ 				<span className="sh-banner-dot" />
+-				{phase === "connecting" ? "Connecting to relay…" : `Joining session…${progress}`}
++				{text}
+ 			</div>
+ 		);
+ 	}
+@@ -23,7 +27,7 @@ export function Banners({ phase, endedReason, loading, onRejoin, onNewLink }: Ba
+ 		return (
+ 			<div className="sh-banner" role="status">
+ 				<span className="sh-banner-dot" />
+-				{`Reconnecting…${progress}`}
++				{cached ? `Saved copy · reconnecting…${progress}` : `Reconnecting…${progress}`}
+ 			</div>
+ 		);
+ 	}
+@@ -33,6 +37,7 @@ export function Banners({ phase, endedReason, loading, onRejoin, onNewLink }: Ba
+ 				<div className="sh-ended-card">
+ 					<div className="sh-ended-title">Session ended</div>
+ 					{endedReason && <div className="sh-ended-reason">{endedReason}</div>}
++					{cached && <div className="sh-ended-reason">The chat behind this is a saved copy from this device.</div>}
+ 					<div className="sh-ended-actions">
+ 						<button type="button" className="sh-btn sh-btn-primary" onClick={onRejoin}>
+ 							Rejoin
+diff --git a/packages/collab-web/src/components/shell/Composer.tsx b/packages/collab-web/src/components/shell/Composer.tsx
+index 93ca980..94de245 100644
+--- a/packages/collab-web/src/components/shell/Composer.tsx
++++ b/packages/collab-web/src/components/shell/Composer.tsx
+@@ -1,8 +1,9 @@
+-import type { CollabUiRequest } from "@oh-my-pi/pi-wire";
+-import { SendHorizontal, Square } from "lucide-react";
+-import type { KeyboardEvent, ReactNode, RefObject } from "react";
++import type { CollabUiRequest, ImageContent } from "@oh-my-pi/pi-wire";
++import { ImagePlus, SendHorizontal, Square, X } from "lucide-react";
++import type { ClipboardEvent, KeyboardEvent, ReactNode, RefObject } from "react";
+ import { memo, useCallback, useLayoutEffect, useRef, useState } from "react";
+ import type { ConnectionPhase, GuestClient } from "../../lib/client";
++import { MAX_PROMPT_IMAGES, prepareImage } from "../../lib/images";
+ 
+ export interface ComposerProps {
+ 	client: GuestClient;
+@@ -34,9 +35,16 @@ function autosize(el: HTMLTextAreaElement | null): void {
+  * composition is active so the keystroke confirms the composition instead of submitting.
+  * `nativeEvent.isComposing` covers most browsers; `composing` bridges WebKit, which fires the
+  * confirming Enter keydown *after* `compositionend`.
++ *
++ * On a touch screen (`touch`: the primary pointer is coarse) Enter always types a newline and
++ * only the Send button sends: a phone keyboard has no Shift+Enter to reach a newline.
+  */
+-export function shouldSubmitOnEnter(e: KeyboardEvent<HTMLTextAreaElement>, composing: boolean): boolean {
+-	if (e.key !== "Enter" || e.shiftKey) return false;
++export function shouldSubmitOnEnter(
++	e: KeyboardEvent<HTMLTextAreaElement>,
++	composing: boolean,
++	touch = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches,
++): boolean {
++	if (e.key !== "Enter" || e.shiftKey || touch) return false;
+ 	return !(e.nativeEvent.isComposing || composing);
+ }
+ 
+@@ -126,14 +134,20 @@ export const Composer = memo(function Composer({
+ 	queuedMessageCount,
+ }: ComposerProps): ReactNode {
+ 	const [text, setText] = useState("");
++	// Images for the next prompt, already re-encoded; `preparing` counts files still encoding.
++	const [images, setImages] = useState<ImageContent[]>([]);
++	const [preparing, setPreparing] = useState(0);
++	const [imageNote, setImageNote] = useState<string | null>(null);
+ 	const taRef = useRef<HTMLTextAreaElement | null>(null);
++	const fileRef = useRef<HTMLInputElement | null>(null);
+ 	const { composingRef, onCompositionStart, onCompositionEnd } = useCompositionGuard();
+ 
+ 	const live = phase === "live";
+ 	const canPrompt = live && !readOnly;
+ 	const busy = working;
+ 	const queued = queuedMessageCount;
+-	const canSend = canPrompt && text.trim().length > 0;
++	const canSend = canPrompt && preparing === 0 && (text.trim().length > 0 || images.length > 0);
++	const canAttach = canPrompt && images.length + preparing < MAX_PROMPT_IMAGES;
+ 
+ 	useLayoutEffect(() => {
+ 		autosize(taRef.current);
+@@ -141,10 +155,37 @@ export const Composer = memo(function Composer({
+ 
+ 	const send = useCallback((): void => {
+ 		const trimmed = text.trim();
+-		if (!trimmed || !live || readOnly) return;
+-		client.sendPrompt(trimmed);
++		if ((!trimmed && images.length === 0) || preparing > 0 || !live || readOnly) return;
++		client.sendPrompt(trimmed, images);
+ 		setText("");
+-	}, [client, live, readOnly, text]);
++		setImages([]);
++		setImageNote(null);
++	}, [client, images, live, preparing, readOnly, text]);
++
++	const addImages = async (files: readonly File[]): Promise<void> => {
++		const picked = files.filter(file => file.type.startsWith("image/"));
++		if (picked.length === 0) return;
++		const take = picked.slice(0, Math.max(0, MAX_PROMPT_IMAGES - images.length - preparing));
++		setImageNote(take.length < picked.length ? `At most ${MAX_PROMPT_IMAGES} images per message.` : null);
++		setPreparing(n => n + take.length);
++		for (const file of take) {
++			try {
++				const image = await prepareImage(file);
++				setImages(prev => [...prev, image]);
++			} catch (err) {
++				setImageNote(`Could not add ${file.name || "the image"}: ${err instanceof Error ? err.message : String(err)}`);
++			} finally {
++				setPreparing(n => n - 1);
++			}
++		}
++	};
++
++	// A pasted screenshot is attached; pasted text still lands in the textarea as usual.
++	const onPaste = (e: ClipboardEvent<HTMLTextAreaElement>): void => {
++		if (!canPrompt) return;
++		const files = Array.from(e.clipboardData.files);
++		if (files.some(file => file.type.startsWith("image/"))) void addImages(files);
++	};
+ 
+ 	const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>): void => {
+ 		if (shouldSubmitOnEnter(e, composingRef.current)) {
+@@ -211,6 +252,26 @@ export const Composer = memo(function Composer({
+ 
+ 	return (
+ 		<div className="sh-composer">
++			{(images.length > 0 || preparing > 0 || imageNote) && (
++				<div className="sh-attachments">
++					{images.map((image, i) => (
++						<span key={`${i}-${image.data.length}`} className="sh-attachment">
++							<img src={`data:${image.mimeType};base64,${image.data}`} alt={`attachment ${i + 1}`} />
++							<button
++								type="button"
++								className="sh-attachment-remove"
++								onClick={() => setImages(prev => prev.filter((_, j) => j !== i))}
++								title="remove image"
++								aria-label={`remove image ${i + 1}`}
++							>
++								<X size={12} />
++							</button>
++						</span>
++					))}
++					{preparing > 0 && <span className="sh-attachment sh-attachment-pending" aria-label="adding image" />}
++					{imageNote && <span className="sh-attachment-note">{imageNote}</span>}
++				</div>
++			)}
+ 			<div className="sh-composer-inner">
+ 				<textarea
+ 					ref={taRef}
+@@ -218,6 +279,7 @@ export const Composer = memo(function Composer({
+ 					value={text}
+ 					onChange={e => setText(e.target.value)}
+ 					onKeyDown={onKeyDown}
++					onPaste={onPaste}
+ 					onCompositionStart={onCompositionStart}
+ 					onCompositionEnd={onCompositionEnd}
+ 					placeholder={
+@@ -232,6 +294,33 @@ export const Composer = memo(function Composer({
+ 					spellCheck={false}
+ 				/>
+ 				<div className="sh-composer-actions">
++					{!readOnly && (
++						<>
++							<input
++								ref={fileRef}
++								type="file"
++								accept="image/*"
++								multiple
++								hidden
++								onChange={e => {
++									const files = Array.from(e.target.files ?? []);
++									// Cleared so the same photo can be picked again after removing it.
++									e.target.value = "";
++									void addImages(files);
++								}}
++							/>
++							<button
++								type="button"
++								className="sh-btn sh-btn-icon"
++								onClick={() => fileRef.current?.click()}
++								disabled={!canAttach}
++								title="attach images"
++								aria-label="attach images"
++							>
++								<ImagePlus size={15} />
++							</button>
++						</>
++					)}
+ 					{busy && queued > 0 && (
+ 						<span className="sh-queued">
+ 							<span className="sh-queued-label">queued </span>×{queued}
+diff --git a/packages/collab-web/src/components/shell/HeaderBar.tsx b/packages/collab-web/src/components/shell/HeaderBar.tsx
+index b1f06a9..ced8ca4 100644
+--- a/packages/collab-web/src/components/shell/HeaderBar.tsx
++++ b/packages/collab-web/src/components/shell/HeaderBar.tsx
+@@ -1,11 +1,10 @@
+ import type { SessionHeader, SessionState } from "@oh-my-pi/pi-wire";
+-import { LogOut, PanelRight } from "lucide-react";
++import { PanelRight } from "lucide-react";
+ import type { ReactNode } from "react";
+ import { memo } from "react";
+ import type { ConnectionPhase } from "../../lib/client";
+ import { fmtPercent, shortenPath } from "../../lib/format";
+ import { OmpMark } from "./OmpMark";
+-import { ThemeToggle } from "./ThemeToggle";
+ 
+ const PHASE_LABEL: Record<ConnectionPhase, string> = {
+ 	connecting: "Connecting",
+@@ -23,7 +22,6 @@ export interface HeaderBarProps {
+ 	subCount: number;
+ 	railOpen: boolean;
+ 	onToggleRail(): void;
+-	onLeave(): void;
+ }
+ 
+ /** Memoized on its snapshot fields, so streaming frames that leave them untouched skip it. */
+@@ -35,9 +33,9 @@ export const HeaderBar = memo(function HeaderBar({
+ 	subCount,
+ 	railOpen,
+ 	onToggleRail,
+-	onLeave,
+ }: HeaderBarProps): ReactNode {
+-	const title = header?.title ?? state?.sessionName ?? "session";
++	// The live name first, so a /rename shows at once; the header's title is from the join.
++	const title = state?.sessionName ?? header?.title ?? "session";
+ 	const usage = state?.contextUsage;
+ 	let pct: number | null = null;
+ 	if (usage) {
+@@ -100,7 +98,6 @@ export const HeaderBar = memo(function HeaderBar({
+ 						))}
+ 					</span>
+ 				)}
+-				<ThemeToggle />
+ 				<button
+ 					type="button"
+ 					className={railOpen ? "sh-btn sh-btn-icon sh-btn-on" : "sh-btn sh-btn-icon"}
+@@ -110,9 +107,6 @@ export const HeaderBar = memo(function HeaderBar({
+ 					<PanelRight size={14} />
+ 					{subCount > 0 && <span className="sh-badge">{subCount}</span>}
+ 				</button>
+-				<button type="button" className="sh-btn sh-btn-icon" onClick={onLeave} title="leave session">
+-					<LogOut size={14} />
+-				</button>
+ 			</div>
+ 		</header>
+ 	);
+diff --git a/packages/collab-web/src/components/shell/shell.css b/packages/collab-web/src/components/shell/shell.css
+index 3de9d54..6c59b6d 100644
+--- a/packages/collab-web/src/components/shell/shell.css
++++ b/packages/collab-web/src/components/shell/shell.css
+@@ -550,6 +550,58 @@
+ 	white-space: nowrap;
+ }
+ 
++/* Images waiting to go with the next prompt, above the composer card. */
++.sh-attachments {
++	display: flex;
++	flex-wrap: wrap;
++	align-items: center;
++	gap: 10px;
++	padding: 6px 4px 10px;
++}
++
++.sh-attachment {
++	position: relative;
++	flex: none;
++	width: 56px;
++	height: 56px;
++	background: var(--bg-raised);
++	border: 1px solid var(--border-strong);
++	border-radius: var(--radius);
++}
++
++.sh-attachment img {
++	display: block;
++	width: 100%;
++	height: 100%;
++	object-fit: cover;
++	border-radius: inherit;
++}
++
++.sh-attachment-pending {
++	animation: pulse 1.2s ease-in-out infinite;
++}
++
++.sh-attachment-remove {
++	position: absolute;
++	top: -8px;
++	right: -8px;
++	display: inline-flex;
++	align-items: center;
++	justify-content: center;
++	width: 24px;
++	height: 24px;
++	padding: 0;
++	color: var(--fg-inverse);
++	background: var(--fg);
++	border: 2px solid var(--bg);
++	border-radius: 50%;
++}
++
++.sh-attachment-note {
++	font-size: 12px;
++	color: var(--warn);
++}
++
+ /* ---- banners ---- */
+ .sh-banner {
+ 	position: fixed;
+@@ -887,6 +939,8 @@
+ 	.sh-main {
+ 		padding: 0 4px 4px;
+ 	}
++	/* The chat name takes the π mark's place, on up to two lines. */
++	.sh-brand,
+ 	.sh-brand-slash,
+ 	.sh-cwd,
+ 	.sh-chip-meta,
+@@ -895,9 +949,21 @@
+ 	.sh-queued-label {
+ 		display: none;
+ 	}
++	.sh-title {
++		display: -webkit-box;
++		-webkit-box-orient: vertical;
++		-webkit-line-clamp: 2;
++		font-size: 15px;
++		line-height: 1.25;
++		white-space: normal;
++		overflow-wrap: anywhere;
++	}
++	/* Dot only: the word stays in the DOM at font-size 0, so drop the gap too, or the
++	   7px gap before the empty label pushes the dot off the circle's center. */
+ 	.sh-status {
+ 		width: 26px;
+ 		padding: 0;
++		gap: 0;
+ 		justify-content: center;
+ 		font-size: 0;
+ 	}
+diff --git a/packages/collab-web/src/lib/client.ts b/packages/collab-web/src/lib/client.ts
+index caec485..2b30ce1 100644
+--- a/packages/collab-web/src/lib/client.ts
++++ b/packages/collab-web/src/lib/client.ts
+@@ -19,6 +19,7 @@ import type {
+ 	CollabUiRequest,
+ 	CollabUiResponseValue,
+ 	HostFrame,
++	ImageContent,
+ 	SessionEntry,
+ 	SessionHeader,
+ 	SessionState,
+@@ -29,6 +30,8 @@ import { takeAutoRejoin } from "@oh-my-pi/pi-wire";
+ import { importRoomKey } from "./codec";
+ import { COLLAB_PROTO, encodeBase64Url, parseCollabLink } from "./link";
+ import { CollabSocket } from "./socket";
++import type { CachedTranscript, TranscriptStore } from "./transcript-cache";
++import { browserTranscriptStore } from "./transcript-cache";
+ 
+ export type ConnectionPhase = "connecting" | "waiting" | "live" | "reconnecting" | "ended";
+ 
+@@ -73,6 +76,11 @@ export interface GuestSnapshot {
+ 	notices: readonly Notice[];
+ 	/** Snapshot download progress between `welcome` and its final chunk, else null. */
+ 	loading: { received: number; total: number } | null;
++	/**
++	 * True while `entries` is this device's saved copy of the chat, shown until
++	 * the host's snapshot completes. The phase is never `live` while it is set.
++	 */
++	cached: boolean;
+ }
+ 
+ const MAX_NOTICES = 50;
+@@ -83,6 +91,10 @@ const WELCOME_TIMEOUT_MS = 30_000;
+ const SNAPSHOT_PROGRESS_TIMEOUT_MS = 30_000;
+ /** Commit delay when `requestAnimationFrame` is unavailable (tests, non-DOM hosts). */
+ const FRAME_FALLBACK_MS = 16;
++/** A transcript change is saved to the on-device copy after this much quiet... */
++const CACHE_SAVE_DELAY_MS = 2_000;
++/** ...or at the latest this long after the first unsaved change, during a busy run. */
++const CACHE_SAVE_MAX_DELAY_MS = 15_000;
+ 
+ /** Runs `callback` on the next animation frame; returns its cancel function. */
+ function scheduleFrame(callback: () => void): () => void {
+@@ -168,18 +180,39 @@ export class GuestClient {
+ 	#publishedEntries: readonly SessionEntry[] = [];
+ 	/** Cancels the scheduled deferred commit; null when none is pending. */
+ 	#cancelFrameCommit: (() => void) | null = null;
++	readonly #roomId: string;
++	readonly #key: Promise<CryptoKey>;
++	/** On-device transcript copy; null runs without one. */
++	readonly #cache: TranscriptStore | null;
++	/** True while the published entries are the on-device copy (see {@link GuestSnapshot.cached}). */
++	#cached = false;
++	/** True once a live snapshot completed; the on-device copy never replaces live entries. */
++	#synced = false;
++	#cacheTimer: Timer | null = null;
++	/** When the oldest unsaved transcript change happened; null when the copy is current. */
++	#cacheDirtySince: number | null = null;
++	/** Saves run one at a time, in order. */
++	#cacheWrites: Promise<void> = Promise.resolve();
+ 
+-	/** @throws Error when the link does not parse. */
+-	constructor(link: string, displayName: string) {
++	/**
++	 * @param cache where the on-device transcript copy lives; null disables it.
++	 * @throws Error when the link does not parse.
++	 */
++	constructor(link: string, displayName: string, cache: TranscriptStore | null = browserTranscriptStore) {
+ 		const parsed = parseCollabLink(link);
+ 		if ("error" in parsed) throw new Error(parsed.error);
+ 		this.#name = displayName;
+ 		this.#writeToken = parsed.writeToken ? encodeBase64Url(parsed.writeToken) : undefined;
+-		this.#socket = new CollabSocket({ wsUrl: parsed.wsUrl, role: "guest", key: importRoomKey(parsed.key) });
++		this.#roomId = parsed.roomId;
++		this.#key = importRoomKey(parsed.key);
++		this.#cache = cache;
++		this.#socket = new CollabSocket({ wsUrl: parsed.wsUrl, role: "guest", key: this.#key });
+ 		this.#socket.onOpen = () => this.#handleOpen();
+ 		this.#socket.onFrame = frame => this.#applyFrameSafe(frame);
+ 		this.#socket.onClose = (reason, willReconnect) => this.#handleClose(reason, willReconnect);
+ 		this.#snapshot = this.#buildSnapshot();
++		// Read while the socket connects; the host's snapshot replaces it when complete.
++		void this.#restoreCachedTranscript();
+ 	}
+ 
+ 	connect(): void {
+@@ -198,6 +231,7 @@ export class GuestClient {
+ 	}
+ 
+ 	close(): void {
++		this.flushCache();
+ 		this.#clearWelcomeTimer();
+ 		this.#clearSnapshotProgressTimer();
+ 		this.#socket.close();
+@@ -215,8 +249,8 @@ export class GuestClient {
+ 		return this.#snapshot;
+ 	}
+ 
+-	sendPrompt(text: string): void {
+-		this.#socket.send({ t: "prompt", text });
++	sendPrompt(text: string, images?: ImageContent[]): void {
++		this.#socket.send({ t: "prompt", text, images: images && images.length > 0 ? images : undefined });
+ 	}
+ 
+ 	sendUiResponse(reqId: number, value?: CollabUiResponseValue): void {
+@@ -252,6 +286,15 @@ export class GuestClient {
+ 		return promise;
+ 	}
+ 
++	/** Writes a pending on-device copy now, e.g. before the browser suspends a hidden tab. */
++	flushCache(): void {
++		if (this.#cacheTimer === null) return;
++		clearTimeout(this.#cacheTimer);
++		this.#cacheTimer = null;
++		this.#cacheDirtySince = null;
++		this.#saveCache();
++	}
++
+ 	/**
+ 	 * Test seam: apply a synthetic host frame through the real apply path. With
+ 	 * `flush` (default), a commit deferred to the next animation frame is
+@@ -354,6 +397,51 @@ export class GuestClient {
+ 		}
+ 	}
+ 
++	/** Shows this chat's on-device copy until the host's snapshot completes. */
++	async #restoreCachedTranscript(): Promise<void> {
++		if (this.#cache === null) return;
++		let cached: CachedTranscript | null;
++		try {
++			cached = await this.#cache.load(this.#roomId, await this.#key);
++		} catch {
++			return;
++		}
++		// Live entries, or a session that already ended, always win over the copy.
++		if (cached === null || this.#synced || this.#phase === "ended" || this.#entries.length > 0) return;
++		if (this.#header !== null && this.#header.id !== cached.sessionId) return;
++		this.#header ??= cached.header;
++		this.#entries = [...cached.entries];
++		this.#publishedEntries = cached.entries;
++		this.#cached = true;
++		this.#commit();
++	}
++
++	/**
++	 * Saves the transcript once changes go quiet for CACHE_SAVE_DELAY_MS, and at
++	 * least every CACHE_SAVE_MAX_DELAY_MS while they keep coming. Only snapshot
++	 * completion and committed entries call this, never streaming tokens.
++	 */
++	#scheduleCacheSave(): void {
++		if (this.#cache === null) return;
++		const now = Date.now();
++		this.#cacheDirtySince ??= now;
++		clearTimeout(this.#cacheTimer ?? undefined);
++		const delay = Math.min(CACHE_SAVE_DELAY_MS, this.#cacheDirtySince + CACHE_SAVE_MAX_DELAY_MS - now);
++		this.#cacheTimer = setTimeout(() => this.flushCache(), Math.max(0, delay));
++	}
++
++	#saveCache(): void {
++		const cache = this.#cache;
++		const header = this.#header;
++		if (cache === null || header === null || !this.#synced || this.#cached) return;
++		const entries = this.#publishedEntries;
++		if (entries.length === 0) return;
++		const transcript: CachedTranscript = { sessionId: header.id, header, entries };
++		this.#cacheWrites = this.#cacheWrites
++			.then(async () => cache.save(this.#roomId, await this.#key, transcript))
++			.catch(() => {});
++	}
++
+ 	/** Surfaces apply failures instead of letting the socket's recv chain swallow them. */
+ 	#applyFrameSafe(frame: HostFrame): void {
+ 		try {
+@@ -375,11 +463,19 @@ export class GuestClient {
+ 				// A fresh welcome (first join or reconnect) restarts the snapshot.
+ 				// Entries already on screen stay until the new snapshot replaces
+ 				// them once complete, so a resync never blanks the transcript.
++				// A saved copy of another session never stands in for this one.
++				if (this.#cached && this.#header?.id !== frame.header.id) {
++					this.#entries = [];
++					this.#publishedEntries = [];
++					this.#cached = false;
++				}
+ 				this.#header = frame.header;
+ 				if (frame.entryCount === 0) {
+ 					this.#entries = [];
+ 					this.#publishedEntries = [];
+ 					this.#pendingSnapshot = null;
++					this.#cached = false;
++					this.#synced = true;
+ 				} else {
+ 					this.#pendingSnapshot = { entries: [], live: [], total: frame.entryCount };
+ 				}
+@@ -424,6 +520,9 @@ export class GuestClient {
+ 				this.#pendingSnapshot = null;
+ 				this.#clearSnapshotProgressTimer();
+ 				this.#phase = "live";
++				this.#cached = false;
++				this.#synced = true;
++				this.#scheduleCacheSave();
+ 				break;
+ 			}
+ 			case "entry":
+@@ -439,6 +538,7 @@ export class GuestClient {
+ 				}
+ 				this.#entries.push(frame.entry);
+ 				this.#publishedEntries = [...this.#entries];
++				if (this.#synced) this.#scheduleCacheSave();
+ 				break;
+ 			case "event":
+ 				this.#applyEvent(frame.event);
+@@ -685,6 +785,7 @@ export class GuestClient {
+ 				received: this.#pendingSnapshot.entries.length,
+ 				total: this.#pendingSnapshot.total,
+ 			},
++			cached: this.#cached,
+ 		};
+ 	}
+ 
+diff --git a/packages/collab-web/src/lib/images.ts b/packages/collab-web/src/lib/images.ts
+new file mode 100644
+index 0000000..10e00d8
+--- /dev/null
++++ b/packages/collab-web/src/lib/images.ts
+@@ -0,0 +1,56 @@
++/**
++ * Turns a picked or pasted image file into an `ImageContent` block for a guest prompt.
++ *
++ * The host saves a guest prompt as one session entry and replicates it back to every guest;
++ * an entry over 1 MiB reaches guests as a placeholder instead (MAX_REPLICATED_PAYLOAD_BYTES
++ * in coding-agent/src/collab/replication-shrink.ts). So every image is re-encoded as a JPEG
++ * of at most MAX_BASE64_CHARS, and MAX_PROMPT_IMAGES of them still fit one entry.
++ */
++import type { ImageContent } from "@oh-my-pi/pi-wire";
++
++export const MAX_PROMPT_IMAGES = 4;
++const MAX_BASE64_CHARS = 220_000;
++/** Claude scales larger images down to about 1.15 megapixels anyway; sending more only costs bytes. */
++const MAX_PIXELS = 1_150_000;
++const QUALITIES = [0.85, 0.75, 0.65, 0.55];
++/** Each further attempt shrinks both sides by this factor when no quality fits the budget. */
++const SHRINK = 0.75;
++const MAX_ATTEMPTS = 4;
++const JPEG_PREFIX = "data:image/jpeg;base64,";
++
++async function decode(file: Blob): Promise<HTMLImageElement> {
++	const url = URL.createObjectURL(file);
++	try {
++		const img = new Image();
++		img.src = url;
++		await img.decode().catch(() => {
++			throw new Error("this browser cannot read that image format");
++		});
++		return img;
++	} finally {
++		URL.revokeObjectURL(url);
++	}
++}
++
++export async function prepareImage(file: Blob): Promise<ImageContent> {
++	const img = await decode(file);
++	const { naturalWidth: width, naturalHeight: height } = img;
++	if (width === 0 || height === 0) throw new Error("the image is empty");
++	let scale = Math.min(1, Math.sqrt(MAX_PIXELS / (width * height)));
++	for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++, scale *= SHRINK) {
++		const canvas = document.createElement("canvas");
++		canvas.width = Math.max(1, Math.round(width * scale));
++		canvas.height = Math.max(1, Math.round(height * scale));
++		const ctx = canvas.getContext("2d");
++		if (!ctx) throw new Error("this browser cannot draw images");
++		// JPEG has no transparency: paint white first so transparent PNG areas do not turn black.
++		ctx.fillStyle = "#fff";
++		ctx.fillRect(0, 0, canvas.width, canvas.height);
++		ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
++		for (const quality of QUALITIES) {
++			const data = canvas.toDataURL("image/jpeg", quality).slice(JPEG_PREFIX.length);
++			if (data.length <= MAX_BASE64_CHARS) return { type: "image", data, mimeType: "image/jpeg" };
++		}
++	}
++	throw new Error("the image is too large to send");
++}
+diff --git a/packages/collab-web/src/lib/theme.ts b/packages/collab-web/src/lib/theme.ts
+index 21edc18..54ff78c 100644
+--- a/packages/collab-web/src/lib/theme.ts
++++ b/packages/collab-web/src/lib/theme.ts
+@@ -21,9 +21,16 @@ function getSystemTheme(): SystemTheme {
+ 	return window.matchMedia(DARK_SCHEME_QUERY).matches ? "dark" : "light";
+ }
+ 
++/** The omp-sessions chat list passes its theme in `?theme=`; the chat page has no toggle of its own. */
++function linkPreference(): ThemePreference | null {
++	if (typeof window === "undefined") return null;
++	const value = new URLSearchParams(window.location.search).get("theme");
++	return value === "light" || value === "dark" || value === "system" ? value : null;
++}
++
+ // Module-level store shared by the toggle (writer) and any reader so an explicit
+ // override and the system default resolve through one source.
+-let preference: ThemePreference = readStoredPreference();
++let preference: ThemePreference = linkPreference() ?? readStoredPreference();
+ let resolved: SystemTheme = preference === "system" ? getSystemTheme() : preference;
+ const listeners = new Set<() => void>();
+ 
+diff --git a/packages/collab-web/src/lib/transcript-cache.ts b/packages/collab-web/src/lib/transcript-cache.ts
+new file mode 100644
+index 0000000..5fd900b
+--- /dev/null
++++ b/packages/collab-web/src/lib/transcript-cache.ts
+@@ -0,0 +1,314 @@
++/**
++ * On-device copy of each chat's transcript, kept in IndexedDB so reopening a
++ * chat, or reloading a tab the phone discarded, shows the last transcript at
++ * once while the host's snapshot downloads. The client swaps in the live
++ * snapshot once it completes; the copy is never shown as live.
++ *
++ * Records are keyed by the omp session id (`SessionHeader.id`). An index on the
++ * room id finds a chat's record from its link before the host's `welcome`
++ * names the session. A room mirrors one session for its whole life; a new room
++ * for the same session (new link, new key) overwrites the record on its first
++ * save.
++ *
++ * Each transcript is sealed with the room key (AES-256-GCM, the session id as
++ * additional data), so the stored copy is no more readable than the link. A
++ * record that does not open with the link's key is deleted.
++ *
++ * Every failure (no IndexedDB, quota, a newer schema, a lost connection)
++ * resolves to "no copy", so the page behaves as it does without a cache.
++ */
++import { asStrictBytes } from "@oh-my-pi/pi-utils/bytes";
++import type { SessionEntry, SessionHeader } from "@oh-my-pi/pi-wire";
++
++export interface CachedTranscript {
++	sessionId: string;
++	header: SessionHeader;
++	entries: readonly SessionEntry[];
++}
++
++export interface TranscriptStore {
++	/** The copy saved for this room's session, or null. Never rejects. */
++	load(roomId: string, key: CryptoKey): Promise<CachedTranscript | null>;
++	/** Replaces the copy of `transcript.sessionId`, then evicts over the limits. Never rejects. */
++	save(roomId: string, key: CryptoKey, transcript: CachedTranscript): Promise<void>;
++}
++
++export interface CacheLimits {
++	/** Chats kept, most recently opened first. */
++	maxChats: number;
++	/** Sealed bytes kept across all chats. */
++	maxTotalBytes: number;
++	/** A transcript larger than this (JSON bytes) is not stored, and its old copy is removed. */
++	maxChatBytes: number;
++}
++
++const MB = 1024 * 1024;
++
++/**
++ * 25 MB per chat holds the measured median session (4.6 MB) five times over; a
++ * bigger chat is skipped because each save rebuilds and seals the whole copy.
++ */
++export const CACHE_LIMITS: CacheLimits = { maxChats: 10, maxTotalBytes: 100 * MB, maxChatBytes: 25 * MB };
++
++/** Plaintext index row; the transcript itself lives sealed in its own store. */
++export interface CachedChatInfo {
++	sessionId: string;
++	roomId: string;
++	/** Sealed size in bytes. */
++	bytes: number;
++	/** Last open or save, epoch ms. */
++	usedAt: number;
++}
++
++/**
++ * Session ids to delete so the rest fit `limits`: the most recently used chats
++ * are kept while both the count and the byte total fit; every older one goes.
++ */
++export function chatsToEvict(chats: readonly CachedChatInfo[], limits: CacheLimits = CACHE_LIMITS): string[] {
++	const newestFirst = [...chats].sort((a, b) => b.usedAt - a.usedAt);
++	const evict: string[] = [];
++	let kept = 0;
++	let total = 0;
++	for (const chat of newestFirst) {
++		if (evict.length === 0 && kept < limits.maxChats && total + chat.bytes <= limits.maxTotalBytes) {
++			kept++;
++			total += chat.bytes;
++		} else {
++			evict.push(chat.sessionId);
++		}
++	}
++	return evict;
++}
++
++// ═══════════════════════════════════════════════════════════════════════════
++// Sealing
++// ═══════════════════════════════════════════════════════════════════════════
++
++const AES_ALGORITHM = "AES-GCM";
++const IV_LENGTH = 12;
++const AAD_PREFIX = "omp-collab-transcript-cache:v1:";
++const TEXT_ENCODER = new TextEncoder();
++const TEXT_DECODER = new TextDecoder();
++
++/** Entry JSON, kept per entry object so a save after new entries only stringifies those. */
++const entryJson = new WeakMap<SessionEntry, string>();
++
++/** JSON of the transcript, or null when it is over `maxBytes`. */
++function serializeTranscript(transcript: CachedTranscript, maxBytes: number): string | null {
++	const parts: string[] = [];
++	// UTF-16 length never exceeds UTF-8 bytes, so an over-cap sum is over cap once encoded.
++	let length = 0;
++	for (const entry of transcript.entries) {
++		let json = entryJson.get(entry);
++		if (json === undefined) {
++			json = JSON.stringify(entry);
++			entryJson.set(entry, json);
++		}
++		length += json.length + 1;
++		if (length > maxBytes) return null;
++		parts.push(json);
++	}
++	return `{"header":${JSON.stringify(transcript.header)},"entries":[${parts.join(",")}]}`;
++}
++
++function additionalData(sessionId: string): Uint8Array<ArrayBuffer> {
++	return TEXT_ENCODER.encode(`${AAD_PREFIX}${sessionId}`);
++}
++
++/** `[12B IV][ciphertext+tag]`, or null when the transcript is over `maxBytes`. */
++export async function sealTranscript(
++	key: CryptoKey,
++	transcript: CachedTranscript,
++	maxBytes = CACHE_LIMITS.maxChatBytes,
++): Promise<Uint8Array | null> {
++	const json = serializeTranscript(transcript, maxBytes);
++	if (json === null) return null;
++	const plaintext = TEXT_ENCODER.encode(json);
++	if (plaintext.byteLength > maxBytes) return null;
++	const iv = new Uint8Array(IV_LENGTH);
++	crypto.getRandomValues(iv);
++	const ciphertext = new Uint8Array(
++		await crypto.subtle.encrypt(
++			{ name: AES_ALGORITHM, iv, additionalData: additionalData(transcript.sessionId) },
++			key,
++			plaintext,
++		),
++	);
++	const out = new Uint8Array(IV_LENGTH + ciphertext.byteLength);
++	out.set(iv, 0);
++	out.set(ciphertext, IV_LENGTH);
++	return out;
++}
++
++/** Inverse of {@link sealTranscript}; null for a wrong key, another session's record, or bad bytes. */
++export async function openTranscript(
++	key: CryptoKey,
++	sessionId: string,
++	sealed: Uint8Array,
++): Promise<CachedTranscript | null> {
++	if (sealed.byteLength <= IV_LENGTH) return null;
++	let payload: { header?: SessionHeader; entries?: unknown };
++	try {
++		const plaintext = await crypto.subtle.decrypt(
++			{
++				name: AES_ALGORITHM,
++				iv: asStrictBytes(sealed.subarray(0, IV_LENGTH)),
++				additionalData: additionalData(sessionId),
++			},
++			key,
++			asStrictBytes(sealed.subarray(IV_LENGTH)),
++		);
++		// Authenticated with the room key and this session id, so it is a record sealTranscript wrote.
++		payload = JSON.parse(TEXT_DECODER.decode(plaintext)) as typeof payload;
++	} catch {
++		return null;
++	}
++	const { header, entries } = payload;
++	if (header?.id !== sessionId || !Array.isArray(entries)) return null;
++	return { sessionId, header, entries: entries as SessionEntry[] };
++}
++
++// ═══════════════════════════════════════════════════════════════════════════
++// IndexedDB
++// ═══════════════════════════════════════════════════════════════════════════
++
++const DB_NAME = "omp-collab-transcripts";
++const DB_VERSION = 1;
++/** {@link CachedChatInfo} rows, keyed by session id, indexed by room id. */
++const CHATS = "chats";
++const ROOM_INDEX = "roomId";
++/** Sealed transcripts, keyed by session id. */
++const SEALED = "sealed";
++
++let database: Promise<IDBDatabase | null> | null = null;
++
++function openDatabase(): Promise<IDBDatabase | null> {
++	if (database !== null) return database;
++	const { promise, resolve } = Promise.withResolvers<IDBDatabase | null>();
++	database = promise;
++	try {
++		const request = indexedDB.open(DB_NAME, DB_VERSION);
++		request.onupgradeneeded = () => {
++			const db = request.result;
++			// The store is a disposable cache: any older layout starts over.
++			for (const name of Array.from(db.objectStoreNames)) db.deleteObjectStore(name);
++			db.createObjectStore(CHATS, { keyPath: "sessionId" }).createIndex(ROOM_INDEX, "roomId");
++			db.createObjectStore(SEALED);
++		};
++		request.onsuccess = () => {
++			const db = request.result;
++			db.onversionchange = () => {
++				db.close();
++				database = null;
++			};
++			resolve(db);
++		};
++		// Private mode, a newer schema, a broken store: run without a cache.
++		request.onerror = () => resolve(null);
++	} catch {
++		// No IndexedDB at all (old browser, test runtime) or access denied.
++		resolve(null);
++	}
++	return promise;
++}
++
++/** Drops the connection after a failed transaction; WebKit can lose it while a tab sleeps. */
++function forgetDatabase(): void {
++	const stale = database;
++	database = null;
++	void stale?.then(db => db?.close());
++}
++
++/** Runs `body` in one transaction over both stores; a closed connection rejects instead of throwing. */
++async function transact(
++	db: IDBDatabase,
++	mode: IDBTransactionMode,
++	body: (chats: IDBObjectStore, sealed: IDBObjectStore) => void,
++): Promise<void> {
++	const { promise, resolve, reject } = Promise.withResolvers<void>();
++	const tx = db.transaction([CHATS, SEALED], mode);
++	tx.oncomplete = () => resolve();
++	tx.onerror = () => reject(tx.error);
++	tx.onabort = () => reject(tx.error);
++	body(tx.objectStore(CHATS), tx.objectStore(SEALED));
++	return promise;
++}
++
++function deleteChat(chats: IDBObjectStore, sealed: IDBObjectStore, sessionId: string): void {
++	chats.delete(sessionId);
++	sealed.delete(sessionId);
++}
++
++async function readRoom(db: IDBDatabase, roomId: string): Promise<{ info: CachedChatInfo; sealed: Uint8Array } | null> {
++	let found: { info: CachedChatInfo; sealed: Uint8Array } | null = null;
++	await transact(db, "readonly", (chats, sealed) => {
++		const infoRequest = chats.index(ROOM_INDEX).get(roomId);
++		infoRequest.onsuccess = () => {
++			// The schema version wipes older layouts, so every row is a CachedChatInfo.
++			const info = infoRequest.result as CachedChatInfo | undefined;
++			if (info === undefined) return;
++			const sealedRequest = sealed.get(info.sessionId);
++			sealedRequest.onsuccess = () => {
++				const bytes: unknown = sealedRequest.result;
++				if (bytes instanceof Uint8Array) found = { info, sealed: bytes };
++			};
++		};
++	});
++	return found;
++}
++
++/** The IndexedDB store the page uses; shared by every client on the page. */
++export const browserTranscriptStore: TranscriptStore = {
++	async load(roomId, key) {
++		try {
++			const db = await openDatabase();
++			if (db === null) return null;
++			const found = await readRoom(db, roomId);
++			if (found === null) return null;
++			const { info } = found;
++			const transcript = await openTranscript(key, info.sessionId, found.sealed);
++			if (transcript === null) {
++				await transact(db, "readwrite", (chats, sealed) => deleteChat(chats, sealed, info.sessionId));
++				return null;
++			}
++			// Mark it most recently used; a failed mark only affects eviction order.
++			transact(db, "readwrite", chats => {
++				chats.put({ ...info, usedAt: Date.now() } satisfies CachedChatInfo);
++			}).catch(forgetDatabase);
++			return transcript;
++		} catch {
++			forgetDatabase();
++			return null;
++		}
++	},
++
++	async save(roomId, key, transcript) {
++		try {
++			const db = await openDatabase();
++			if (db === null) return;
++			const bytes = await sealTranscript(key, transcript);
++			await transact(db, "readwrite", (chats, sealed) => {
++				if (bytes === null) {
++					deleteChat(chats, sealed, transcript.sessionId);
++					return;
++				}
++				const info: CachedChatInfo = {
++					sessionId: transcript.sessionId,
++					roomId,
++					bytes: bytes.byteLength,
++					usedAt: Date.now(),
++				};
++				chats.put(info);
++				sealed.put(bytes, info.sessionId);
++				const all = chats.getAll();
++				all.onsuccess = () => {
++					for (const sessionId of chatsToEvict(all.result as CachedChatInfo[])) {
++						deleteChat(chats, sealed, sessionId);
++					}
++				};
++			});
++		} catch {
++			forgetDatabase();
++		}
++	},
++};
+diff --git a/packages/collab-web/test/transcript-cache.test.ts b/packages/collab-web/test/transcript-cache.test.ts
+new file mode 100644
+index 0000000..2d4a365
+--- /dev/null
++++ b/packages/collab-web/test/transcript-cache.test.ts
+@@ -0,0 +1,165 @@
++import { describe, expect, it, vi } from "bun:test";
++import type { HostFrame, SessionEntry, SessionHeader, SessionState } from "@oh-my-pi/pi-wire";
++import { GuestClient } from "../src/lib/client";
++import { generateRoomKey, importRoomKey } from "../src/lib/codec";
++import { COLLAB_PROTO, encodeBase64Url } from "../src/lib/link";
++import type { CachedChatInfo, CachedTranscript, TranscriptStore } from "../src/lib/transcript-cache";
++import { chatsToEvict, openTranscript, sealTranscript } from "../src/lib/transcript-cache";
++
++const LINK = `roomroomroom1234#${encodeBase64Url(new Uint8Array(32))}`;
++const HEADER: SessionHeader = { type: "session", id: "s1", timestamp: "2026-06-12T00:00:00Z", cwd: "/work" };
++const STATE: SessionState = { isStreaming: false, queuedMessageCount: 0, cwd: "/work", participants: [] };
++
++function entry(id: string, text: string): SessionEntry {
++	return {
++		type: "message",
++		id,
++		parentId: null,
++		timestamp: "2026-06-12T00:00:01Z",
++		message: { role: "user", content: text, timestamp: 1 },
++	};
++}
++
++function welcome(entryCount: number, header = HEADER): HostFrame {
++	return { t: "welcome", proto: COLLAB_PROTO, header, state: STATE, agents: [], entryCount };
++}
++
++/** In-memory store. `release` hands the client its saved copy and returns once the client applied it. */
++function memoryStore(saved: CachedTranscript | null) {
++	const loadCalled = Promise.withResolvers<void>();
++	const loaded = Promise.withResolvers<CachedTranscript | null>();
++	const firstSave = Promise.withResolvers<void>();
++	const saves: CachedTranscript[] = [];
++	const store: TranscriptStore = {
++		load: () => {
++			loadCalled.resolve();
++			return loaded.promise;
++		},
++		save: async (_roomId, _key, transcript) => {
++			saves.push(transcript);
++			firstSave.resolve();
++		},
++	};
++	const release = async (): Promise<void> => {
++		await loadCalled.promise;
++		loaded.resolve(saved);
++		// The client awaited this same promise first, so its continuation has run.
++		await loaded.promise;
++	};
++	return { store, saves, firstSave: firstSave.promise, release };
++}
++
++const CHAT = (sessionId: string, bytes: number, usedAt: number): CachedChatInfo => ({
++	sessionId,
++	roomId: `room-${sessionId}`,
++	bytes,
++	usedAt,
++});
++
++describe("chatsToEvict", () => {
++	const limits = { maxChats: 2, maxTotalBytes: 100, maxChatBytes: 100 };
++
++	it("keeps the most recently used chats up to the count", () => {
++		const chats = [CHAT("old", 1, 1), CHAT("new", 1, 3), CHAT("mid", 1, 2)];
++		expect(chatsToEvict(chats, limits)).toEqual(["old"]);
++	});
++
++	it("evicts every older chat once the byte total is reached", () => {
++		// "mid" does not fit next to "new"; the smaller "old" goes too, so order stays strict LRU.
++		const chats = [CHAT("old", 10, 1), CHAT("mid", 60, 2), CHAT("new", 50, 3)];
++		expect(chatsToEvict(chats, limits)).toEqual(["mid", "old"]);
++	});
++});
++
++describe("sealed transcripts", () => {
++	const transcript: CachedTranscript = { sessionId: "s1", header: HEADER, entries: [entry("e1", "secret words")] };
++
++	it("round-trips with the room key and stores no plaintext", async () => {
++		const key = await importRoomKey(generateRoomKey());
++		const sealed = await sealTranscript(key, transcript);
++		if (sealed === null) throw new Error("expected a sealed transcript");
++		expect(new TextDecoder().decode(sealed)).not.toContain("secret");
++		expect(await openTranscript(key, "s1", sealed)).toEqual(transcript);
++	});
++
++	it("never opens with another key or for another session", async () => {
++		const key = await importRoomKey(generateRoomKey());
++		const sealed = await sealTranscript(key, transcript);
++		if (sealed === null) throw new Error("expected a sealed transcript");
++		expect(await openTranscript(await importRoomKey(generateRoomKey()), "s1", sealed)).toBeNull();
++		expect(await openTranscript(key, "s2", sealed)).toBeNull();
++	});
++
++	it("skips a transcript over the per-chat cap", async () => {
++		const key = await importRoomKey(generateRoomKey());
++		expect(await sealTranscript(key, transcript, 20)).toBeNull();
++	});
++});
++
++describe("GuestClient on-device copy", () => {
++	const saved: CachedTranscript = { sessionId: "s1", header: HEADER, entries: [entry("c1", "cached")] };
++
++	it("shows the saved copy, marked cached, until the live snapshot replaces it", async () => {
++		const { store, release } = memoryStore(saved);
++		const client = new GuestClient(LINK, "tester", store);
++		await release();
++		let snap = client.getSnapshot();
++		expect(snap.entries).toEqual(saved.entries);
++		expect(snap.cached).toBe(true);
++		expect(snap.phase).not.toBe("live");
++
++		client.applyFrameForTest(welcome(1));
++		expect(client.getSnapshot().entries).toEqual(saved.entries);
++		expect(client.getSnapshot().cached).toBe(true);
++
++		const live = entry("l1", "live");
++		client.applyFrameForTest({ t: "snapshot-chunk", entries: [live], final: true });
++		snap = client.getSnapshot();
++		expect(snap.entries).toEqual([live]);
++		expect(snap.cached).toBe(false);
++		expect(snap.phase).toBe("live");
++	});
++
++	it("ignores a saved copy that arrives after the live snapshot", async () => {
++		const { store, release } = memoryStore(saved);
++		const client = new GuestClient(LINK, "tester", store);
++		const live = entry("l1", "live");
++		client.applyFrameForTest(welcome(1));
++		client.applyFrameForTest({ t: "snapshot-chunk", entries: [live], final: true });
++		await release();
++		expect(client.getSnapshot().entries).toEqual([live]);
++		expect(client.getSnapshot().cached).toBe(false);
++	});
++
++	it("drops a saved copy of another session on welcome", async () => {
++		const { store, release } = memoryStore(saved);
++		const client = new GuestClient(LINK, "tester", store);
++		await release();
++		client.applyFrameForTest(welcome(3, { ...HEADER, id: "other" }));
++		expect(client.getSnapshot().entries).toEqual([]);
++		expect(client.getSnapshot().cached).toBe(false);
++	});
++
++	it("saves the live transcript after changes go quiet, never the saved copy itself", async () => {
++		vi.useFakeTimers();
++		try {
++			const { store, saves, firstSave, release } = memoryStore(saved);
++			const client = new GuestClient(LINK, "tester", store);
++			await release();
++			client.applyFrameForTest(welcome(1));
++			vi.advanceTimersByTime(5_000);
++
++			const live = entry("l1", "live");
++			client.applyFrameForTest({ t: "snapshot-chunk", entries: [live], final: true });
++			vi.advanceTimersByTime(1_000);
++			const next = entry("l2", "next");
++			client.applyFrameForTest({ t: "entry", entry: next });
++			vi.advanceTimersByTime(2_000);
++			await firstSave;
++			// One save, holding both entries: the snapshot's save waited for the entry.
++			expect(saves).toEqual([{ sessionId: "s1", header: HEADER, entries: [live, next] }]);
++		} finally {
++			vi.useRealTimers();
++		}
++	});
++});

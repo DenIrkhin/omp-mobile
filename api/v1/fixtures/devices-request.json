@@ -1,0 +1,12 @@
+{
+  "token": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "environment": "sandbox",
+  "bundleId": "io.github.you.ompmobile",
+  "appVersion": "0.1.0 (3)",
+  "events": {
+    "input": true,
+    "reportFailed": true,
+    "reportUpdate": false,
+    "turnDone": false
+  }
+}

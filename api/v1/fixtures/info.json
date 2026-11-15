@@ -1,0 +1,18 @@
+{
+  "apiVersion": 1,
+  "serverVersion": "0.1.0",
+  "ompVersion": "18.4.10",
+  "login": "you@example.com",
+  "deviceName": "iphone",
+  "mainProfile": "work",
+  "features": {
+    "longTasks": true,
+    "launch": false,
+    "control": false,
+    "devCycles": false,
+    "reports": false,
+    "push": false,
+    "pageCopy": true
+  },
+  "push": null
+}

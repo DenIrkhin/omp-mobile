@@ -1,0 +1,12 @@
+{
+  "token": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "deviceName": "iphone",
+  "events": {
+    "input": true,
+    "reportFailed": true,
+    "reportUpdate": false,
+    "turnDone": false
+  },
+  "registeredAt": "2026-11-14T08:00:00.000Z",
+  "lastSeenAt": "2026-11-14T09:30:00.000Z"
+}

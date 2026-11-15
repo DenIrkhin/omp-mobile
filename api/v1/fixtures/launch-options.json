@@ -1,0 +1,8 @@
+{
+  "folders": ["/Users/you/dev", "/Users/you/dev/751orion-web", "/Users/you/dev/795vega"],
+  "models": [
+    { "id": "default", "label": "Profile default" },
+    { "id": "fast", "label": "Fast" }
+  ],
+  "defaultModel": "default"
+}

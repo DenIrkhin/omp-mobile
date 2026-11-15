@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-title" content="omp Sessions">
+  <title>omp Sessions</title>
+  <!-- A plain script, not deferred: it sets data-theme on <html> before the first paint. -->
+  <script src="/theme.js"></script>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <div class="app-container">
+    <header class="top-bar">
+      <div class="title-group">
+        <h1 class="app-title">omp Sessions</h1>
+        <p id="status-text" class="status-indicator">Connecting…</p>
+      </div>
+      <div class="top-actions">
+        <!-- Cycles system, light, dark. CSS shows the icon of the current choice; app.js names it. -->
+        <button id="theme-btn" class="icon-button" aria-label="Theme" type="button">
+          <svg class="theme-icon theme-icon-system" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect width="20" height="14" x="2" y="3" rx="2"/><path d="M8 21h8M12 17v4"/>
+          </svg>
+          <svg class="theme-icon theme-icon-light" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>
+          </svg>
+          <svg class="theme-icon theme-icon-dark" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>
+          </svg>
+        </button>
+        <button id="new-session-btn" class="icon-button" aria-label="Start a new session" type="button">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+            <path d="M12 5v14M5 12h14"/>
+          </svg>
+        </button>
+        <button id="refresh-btn" class="icon-button" aria-label="Refresh session list" type="button">
+          <svg class="refresh-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-1.19"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <div id="error-banner" class="banner error-banner hidden" role="alert"></div>
+
+    <div class="search-bar">
+      <input id="search-input" class="field-input search-input" type="search" placeholder="Search by name or folder" aria-label="Search this tab by name or folder" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="search">
+      <!-- Chats: live chats that are not pinned. Long tasks: pinned omp sessions, live or closed. -->
+      <div id="tab-bar" class="tab-bar" role="tablist" aria-label="Session lists">
+        <button id="tab-chats" class="tab" type="button" role="tab" aria-selected="true" aria-controls="session-list">Chats <span id="tab-chats-count" class="tab-count"></span></button>
+        <button id="tab-long-tasks" class="tab" type="button" role="tab" aria-selected="false" aria-controls="session-list" tabindex="-1">Long tasks <span id="tab-long-tasks-count" class="tab-count"></span></button>
+      </div>
+      <!-- Project filter chips; app.js fills them from the projects /api/v1/hosts lists. -->
+      <div id="project-chips" class="project-chips" role="group" aria-label="Filter by project"></div>
+      <p id="search-count" class="search-count" aria-live="polite"></p>
+    </div>
+
+    <main>
+      <div id="session-list" class="session-list" role="tabpanel" aria-labelledby="tab-chats" aria-live="polite">
+        <div class="empty-state">
+          <p class="empty-title">Scanning for sessions…</p>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <div id="toast-container" class="toast-container" aria-live="assertive"></div>
+
+  <!-- Confirmation modal for full-control access -->
+  <dialog id="confirm-dialog" class="confirm-dialog">
+    <form method="dialog" class="dialog-content">
+      <h2 class="dialog-title">Grant Full Control?</h2>
+      <p id="dialog-body" class="dialog-body">Opening control access allows this link to prompt the agent and execute tools on your Mac.</p>
+      <div class="dialog-actions">
+        <button id="dialog-cancel" value="cancel" class="btn btn-secondary" type="submit">Cancel</button>
+        <button id="dialog-confirm" value="confirm" class="btn btn-danger" type="submit">Open Control</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Start a new omp session in a cmux workspace on the Mac -->
+  <dialog id="launch-dialog" class="confirm-dialog">
+    <form id="launch-form" class="dialog-content">
+      <h2 class="dialog-title">New session</h2>
+      <label class="field">
+        <span class="field-label">Folder</span>
+        <select id="launch-folder" class="field-input" required></select>
+      </label>
+      <label class="field">
+        <span class="field-label">Model</span>
+        <select id="launch-model" class="field-input"></select>
+      </label>
+      <p id="launch-status" class="dialog-body launch-status" aria-live="polite"></p>
+      <div class="dialog-actions">
+        <button id="launch-cancel" class="btn btn-secondary" type="button">Cancel</button>
+        <button id="launch-start" class="btn btn-primary" type="submit">Start</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Change a running session's model or thinking level, run a skill, or compact it.
+       Talks to the omp-sessions control extension inside that session. -->
+  <dialog id="manage-dialog" class="confirm-dialog">
+    <div class="dialog-content">
+      <h2 id="manage-title" class="dialog-title">Manage session</h2>
+      <p id="manage-state" class="dialog-body manage-state"></p>
+      <div class="field">
+        <label class="field-label" for="manage-model">Model</label>
+        <div class="field-row">
+          <select id="manage-model" class="field-input"></select>
+          <button id="manage-model-apply" class="btn btn-secondary" type="button">Switch</button>
+        </div>
+      </div>
+      <div class="field">
+        <label class="field-label" for="manage-thinking">Thinking</label>
+        <div class="field-row">
+          <select id="manage-thinking" class="field-input"></select>
+          <button id="manage-thinking-apply" class="btn btn-secondary" type="button">Set</button>
+        </div>
+      </div>
+      <div class="field">
+        <label class="field-label" for="manage-skill">Skill</label>
+        <div class="field-row">
+          <select id="manage-skill" class="field-input"></select>
+          <button id="manage-skill-run" class="btn btn-secondary" type="button">Run</button>
+        </div>
+        <input id="manage-skill-args" class="field-input" type="text" maxlength="4000" placeholder="Arguments (optional)" aria-label="Skill arguments" autocomplete="off">
+      </div>
+      <!-- Filled from the status reply's `cycle`; hidden in folders without cycle commands. -->
+      <div id="manage-cycle-field" class="field hidden">
+        <label class="field-label" for="manage-cycle">Dev cycle</label>
+        <p id="manage-cycle-note" class="manage-cycle-note"></p>
+        <div id="manage-cycle-start" class="field-stack">
+          <div class="field-row">
+            <select id="manage-cycle" class="field-input"></select>
+            <button id="manage-cycle-run" class="btn btn-secondary" type="button">Start</button>
+          </div>
+          <input id="manage-cycle-args" class="field-input" type="text" maxlength="4000" placeholder="Arguments" aria-label="Cycle arguments" autocomplete="off">
+        </div>
+        <div id="manage-cycle-live" class="field-row manage-cycle-live">
+          <button id="manage-cycle-resume" class="btn btn-secondary" type="button">Resume</button>
+          <button id="manage-cycle-stop" class="btn btn-secondary" type="button">Stop</button>
+        </div>
+      </div>
+      <div class="field">
+        <label class="field-label" for="manage-compact-focus">Compact context</label>
+        <div class="field-row">
+          <input id="manage-compact-focus" class="field-input" type="text" maxlength="2000" placeholder="Focus (optional)" autocomplete="off">
+          <button id="manage-compact" class="btn btn-secondary" type="button">Compact</button>
+        </div>
+      </div>
+      <p id="manage-message" class="dialog-body manage-message" aria-live="polite"></p>
+      <div class="dialog-actions">
+        <button id="manage-close" class="btn btn-secondary" type="button">Close</button>
+      </div>
+    </div>
+  </dialog>
+
+  <script src="/app.js"></script>
+</body>
+</html>
